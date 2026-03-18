@@ -36,6 +36,18 @@ export interface ACCampaign {
   socialshares: string
   replies: string
   uniquereplies: string
+  // List IDs this campaign was sent to (returned from individual campaign endpoint)
+  lists?: string[]
+}
+
+/**
+ * Statistics returned from GET /api/3/campaigns/{id}/statistics
+ * (same shape as the main campaign object; fields may vary)
+ */
+export type ACCampaignStatistics = Partial<ACCampaign>
+
+export interface ACCampaignStatisticsResponse {
+  campaign: ACCampaignStatistics
 }
 
 /**
@@ -63,6 +75,52 @@ export interface ACCampaignResponse {
 }
 
 /**
+ * A single ActiveCampaign list
+ */
+export interface ACList {
+  id: string
+  name: string
+  cdate: string
+  udate: string
+  subscriber_count?: string
+}
+
+export interface ACListsResponse {
+  lists: ACList[]
+  meta: ACMeta
+}
+
+/**
+ * A tag definition from GET /api/3/tags
+ */
+export interface ACTagDefinition {
+  id: string
+  tag: string          // the tag name/label
+  description: string
+  cdate: string
+  subscriber_count?: string
+}
+
+export interface ACTagsResponse {
+  tags: ACTagDefinition[]
+  meta: ACMeta
+}
+
+/**
+ * A contact-tag association from contact tags endpoint
+ */
+export interface ACContactTag {
+  id: string
+  contact: string    // contact ID
+  tag: string        // tag ID
+  cdate: string
+}
+
+export interface ACContactTagsResponse {
+  contactTags: ACContactTag[]
+}
+
+/**
  * Raw contact object from GET /api/3/contacts
  */
 export interface ACContact {
@@ -80,6 +138,8 @@ export interface ACContact {
   adate: string | null  // subscribed date
   gravatar: string
   fieldValues?: ACContactFieldValue[]
+  // contactTags may be included when using ?include=contactTags
+  contactTags?: ACContactTag[]
 }
 
 export interface ACContactFieldValue {
@@ -98,6 +158,8 @@ export interface ACContactFieldValue {
 export interface ACContactsResponse {
   contacts: ACContact[]
   meta: ACMeta
+  // contactTags included when ?include=contactTags is used
+  contactTags?: ACContactTag[]
 }
 
 // ============================================================

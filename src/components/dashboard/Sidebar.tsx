@@ -53,7 +53,11 @@ const NAV_ITEMS = [
   },
 ]
 
-export default function Sidebar() {
+interface SidebarProps {
+  onClose?: () => void
+}
+
+export default function Sidebar({ onClose }: SidebarProps) {
   const pathname = usePathname()
   const router = useRouter()
 
@@ -70,9 +74,9 @@ export default function Sidebar() {
   }
 
   return (
-    <aside className="flex flex-col w-64 min-h-screen bg-gray-900 text-gray-100">
+    <aside className="flex flex-col w-64 h-full bg-gray-900 text-gray-100">
       {/* Brand */}
-      <div className="flex items-center gap-2.5 px-6 py-5 border-b border-gray-700/50">
+      <div className="flex items-center justify-between gap-2.5 px-6 py-5 border-b border-gray-700/50">
         <div className="h-8 w-8 rounded-lg bg-indigo-500 flex items-center justify-center flex-shrink-0">
           <svg className="h-5 w-5 text-white" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" d="M21.75 6.75v10.5a2.25 2.25 0 0 1-2.25 2.25h-15a2.25 2.25 0 0 1-2.25-2.25V6.75m19.5 0A2.25 2.25 0 0 0 19.5 4.5h-15a2.25 2.25 0 0 0-2.25 2.25m19.5 0v.243a2.25 2.25 0 0 1-1.07 1.916l-7.5 4.615a2.25 2.25 0 0 1-2.36 0L3.32 8.91a2.25 2.25 0 0 1-1.07-1.916V6.75" />
@@ -82,6 +86,18 @@ export default function Sidebar() {
           <p className="text-sm font-semibold text-white">Milennia</p>
           <p className="text-xs text-gray-400">Email Dashboard</p>
         </div>
+        {/* Close button — mobile only */}
+        {onClose && (
+          <button
+            onClick={onClose}
+            className="lg:hidden p-1.5 rounded-md text-gray-400 hover:text-white hover:bg-gray-800 transition-colors ml-auto"
+            aria-label="Close navigation"
+          >
+            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" />
+            </svg>
+          </button>
+        )}
       </div>
 
       {/* Navigation */}
@@ -92,6 +108,7 @@ export default function Sidebar() {
             <Link
               key={item.href}
               href={item.href}
+              onClick={onClose}
               className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${
                 active
                   ? 'bg-indigo-600 text-white'

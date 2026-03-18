@@ -1,5 +1,6 @@
 import Link from 'next/link'
-import type { NormalizedCampaign, CampaignStatus } from '@/types/activecampaign'
+import type { CampaignStatus } from '@/types/activecampaign'
+import type { CampaignRow } from '@/app/dashboard/campaigns/page'
 
 function StatusBadge({ status }: { status: CampaignStatus }) {
   const styles: Record<CampaignStatus, string> = {
@@ -19,20 +20,20 @@ function StatusBadge({ status }: { status: CampaignStatus }) {
   )
 }
 
-function formatDate(dateStr: string | null): string {
+function formatDate(dateStr: string | null | undefined): string {
   if (!dateStr) return '—'
   const d = new Date(dateStr)
   if (isNaN(d.getTime())) return '—'
   return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
 }
 
-function formatRate(rate: number): string {
-  if (rate === 0) return '—'
+function formatRate(rate: number | null | undefined): string {
+  if (rate === null || rate === undefined || rate === 0) return '—'
   return `${(rate * 100).toFixed(1)}%`
 }
 
 interface CampaignTableProps {
-  campaigns: NormalizedCampaign[]
+  campaigns: CampaignRow[]
 }
 
 export default function CampaignTable({ campaigns }: CampaignTableProps) {
@@ -83,16 +84,18 @@ export default function CampaignTable({ campaigns }: CampaignTableProps) {
               className="hover:bg-gray-50 transition-colors cursor-pointer"
             >
               <td className="px-6 py-4">
-                <Link
-                  href={`/dashboard/campaigns/${campaign.id}`}
-                  className="block"
-                >
+                <Link href={`/dashboard/campaigns/${campaign.id}`} className="block">
                   <p className="text-sm font-medium text-gray-900 truncate max-w-xs hover:text-indigo-600 transition-colors">
                     {campaign.name}
                   </p>
                   {campaign.subject && (
                     <p className="text-xs text-gray-400 truncate max-w-xs mt-0.5">
                       {campaign.subject}
+                    </p>
+                  )}
+                  {campaign.listName && (
+                    <p className="text-xs text-gray-400 truncate max-w-xs mt-0.5">
+                      → {campaign.listName}
                     </p>
                   )}
                 </Link>

@@ -4,65 +4,80 @@ import CampaignTable from '@/components/campaigns/CampaignTable'
 import CampaignFilters from '@/components/campaigns/CampaignFilters'
 import SkeletonTable from '@/components/ui/SkeletonTable'
 import ErrorMessage from '@/components/ui/ErrorMessage'
-import { fetchAllCampaigns } from '@/lib/activecampaign/client'
-import { normalizeACCampaign } from '@/types/activecampaign'
-import type { NormalizedCampaign } from '@/types/activecampaign'
+import { createClient } from '@/lib/supabase/server'
+import type { DbCampaign, CampaignStatus } from '@/types'
 
-// Map UI filter value → ActiveCampaign status code
-const STATUS_TO_AC: Record<string, string> = {
-  sent: '5',
-  scheduled: '1',
-  draft: '0',
+function dbCampaignToRow(c: DbCampaign) {
+  return {
+    id: c.external_id,         // AC external ID — used in route /campaigns/{id}
+    dbId: c.id,
+    name: c.name,
+    subject: c.subject,
+    fromName: c.from_name,
+    fromEmail: c.from_email,
+    status: (c.status ?? 'draft') as CampaignStatus,
+    type: c.type,
+    sendDate: c.send_date,
+    listName: c.list_name,
+    totalSent: c.total_sent,
+    uniqueOpens: c.unique_opens,
+    totalClicks: c.total_clicks,
+    unsubscribes: c.unsubscribes,
+    openRate: c.open_rate,
+    clickRate: c.click_rate,
+  }
 }
+
+export type CampaignRow = ReturnType<typeof dbCampaignToRow>
 
 interface CampaignsContentProps {
   statusFilter: string | undefined
 }
 
 async function CampaignsContent({ statusFilter }: CampaignsContentProps) {
-  let campaigns: NormalizedCampaign[] = []
-  let errorMessage: string | null = null
+  const supabase = createClient()
 
-  try {
-    const acStatus =
-      statusFilter && STATUS_TO_AC[statusFilter]
-        ? STATUS_TO_AC[statusFilter]
-        : undefined
+  let query = supabase
+    .from('campaigns')
+    .select('*')
+    .order('send_date', { ascending: false, nullsFirst: false })
 
-    const raw = await fetchAllCampaigns(acStatus)
-    campaigns = raw.map(normalizeACCampaign)
-
-    // Client-side filter for statuses AC doesn't filter directly (paused/sending)
-    if (statusFilter && !STATUS_TO_AC[statusFilter]) {
-      campaigns = campaigns.filter((c) => c.status === statusFilter)
-    }
-
-    // Sort by send date descending, drafts last
-    campaigns.sort((a, b) => {
-      if (!a.sendDate && !b.sendDate) return 0
-      if (!a.sendDate) return 1
-      if (!b.sendDate) return -1
-      return new Date(b.sendDate).getTime() - new Date(a.sendDate).getTime()
-    })
-  } catch (err) {
-    errorMessage =
-      err instanceof Error ? err.message : 'Failed to load campaigns'
+  if (statusFilter) {
+    query = query.eq('status', statusFilter)
   }
 
-  if (errorMessage) {
+  const { data, error } = await query
+
+  if (error) {
     return (
       <div className="px-6 py-6">
-        <ErrorMessage
-          title="Could not load campaigns"
-          message={errorMessage}
-        />
+        <ErrorMessage title="Could not load campaigns" message={error.message} />
+      </div>
+    )
+  }
+
+  const campaigns = (data as DbCampaign[]).map(dbCampaignToRow)
+
+  if (campaigns.length === 0) {
+    return (
+      <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+        <div className="flex flex-col items-center justify-center py-20 text-gray-400">
+          <svg className="h-10 w-10 mb-3" fill="none" viewBox="0 0 24 24" strokeWidth={1} stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M21.75 6.75v10.5a2.25 2.25 0 0 1-2.25 2.25h-15a2.25 2.25 0 0 1-2.25-2.25V6.75m19.5 0A2.25 2.25 0 0 0 19.5 4.5h-15a2.25 2.25 0 0 0-2.25 2.25m19.5 0v.243a2.25 2.25 0 0 1-1.07 1.916l-7.5 4.615a2.25 2.25 0 0 1-2.36 0L3.32 8.91a2.25 2.25 0 0 1-1.07-1.916V6.75" />
+          </svg>
+          <p className="text-sm font-medium">No campaigns found</p>
+          <p className="text-xs mt-1 text-gray-400">
+            {statusFilter ? 'Try a different filter, or' : 'Use'} the{' '}
+            <span className="font-medium text-gray-500">Sync now</span> button on the overview to import campaigns.
+          </p>
+        </div>
       </div>
     )
   }
 
   return (
     <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
-      <div className="px-6 py-3 border-b border-gray-100 flex items-center justify-between">
+      <div className="px-6 py-3 border-b border-gray-100">
         <p className="text-sm text-gray-500">
           {campaigns.length} campaign{campaigns.length !== 1 ? 's' : ''}
         </p>
@@ -83,19 +98,21 @@ export default function CampaignsPage({ searchParams }: CampaignsPageProps) {
     <div>
       <Header
         title="Campaigns"
-        subtitle="Live data from ActiveCampaign"
+        subtitle="Synced from ActiveCampaign"
       />
 
       <div className="px-6 py-6 space-y-4">
-        {/* Filters — wrapped in Suspense because useSearchParams requires it */}
         <div className="flex items-center justify-between">
           <Suspense fallback={<div className="h-9 w-64 bg-gray-100 rounded-lg animate-pulse" />}>
             <CampaignFilters />
           </Suspense>
         </div>
 
-        {/* Campaign table */}
-        <Suspense fallback={<div className="bg-white border border-gray-200 rounded-xl overflow-hidden"><SkeletonTable rows={8} cols={7} /></div>}>
+        <Suspense fallback={
+          <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+            <SkeletonTable rows={8} cols={7} />
+          </div>
+        }>
           <CampaignsContent statusFilter={statusFilter} />
         </Suspense>
       </div>

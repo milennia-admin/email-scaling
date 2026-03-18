@@ -1,18 +1,25 @@
 import { NextResponse } from 'next/server'
 import { createClient, createAdminClient } from '@/lib/supabase/server'
-import { fetchAllCampaigns, fetchContactsBatched } from '@/lib/activecampaign/client'
+import {
+  fetchAllCampaigns,
+  fetchCampaignStatistics,
+  fetchAllLists,
+  fetchAllTags,
+  fetchContactsBatched,
+} from '@/lib/activecampaign/client'
 import { normalizeACCampaign } from '@/types/activecampaign'
 import type { ACContact } from '@/types/activecampaign'
+
+/** 100ms pause between per-campaign stat calls to respect AC rate limits */
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
 
 /**
  * POST /api/sync/activecampaign
  *
- * Fetches campaigns and contacts from ActiveCampaign and upserts them
- * into Supabase. Authentication required. Intended to be called:
- *   - Manually via curl / dashboard action
- *   - By a Vercel Cron job
- *
- * Returns a JSON summary of what was synced.
+ * Fetches campaigns (with per-campaign statistics), contacts, and tags from
+ * ActiveCampaign, then upserts everything into Supabase.
  */
 export async function POST(request: Request) {
   // ── 1. Auth check ─────────────────────────────────────────────────────────
@@ -22,16 +29,12 @@ export async function POST(request: Request) {
   } = await supabase.auth.getUser()
 
   if (!user) {
-    return NextResponse.json(
-      { error: 'Unauthorized' },
-      { status: 401 }
-    )
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
-  // ── 2. Admin client (bypasses RLS for writes) ──────────────────────────────
   const admin = createAdminClient()
 
-  // ── 3. Create sync log entry ───────────────────────────────────────────────
+  // ── 2. Create sync log entry ───────────────────────────────────────────────
   const { data: syncLog, error: logError } = await admin
     .from('sync_logs')
     .insert({
@@ -43,10 +46,7 @@ export async function POST(request: Request) {
     .single()
 
   if (logError || !syncLog) {
-    return NextResponse.json(
-      { error: 'Failed to create sync log' },
-      { status: 500 }
-    )
+    return NextResponse.json({ error: 'Failed to create sync log' }, { status: 500 })
   }
 
   const syncLogId: string = syncLog.id
@@ -56,13 +56,34 @@ export async function POST(request: Request) {
   let contactsUpserted = 0
 
   try {
-    // ── 4. Sync campaigns ────────────────────────────────────────────────────
+    // ── 3. Fetch all AC lists for list-name lookup ─────────────────────────
+    const allLists = await fetchAllLists()
+    const listNameMap: Record<string, string> = {}
+    for (const list of allLists) {
+      listNameMap[list.id] = list.name
+    }
+
+    // ── 4. Fetch all AC tags for tag-name lookup ───────────────────────────
+    const allTags = await fetchAllTags()
+    const tagNameMap: Record<string, string> = {}
+    for (const tag of allTags) {
+      tagNameMap[tag.id] = tag.tag
+    }
+
+    // ── 5. Sync campaigns (initial pass with list data) ────────────────────
     const rawCampaigns = await fetchAllCampaigns()
     campaignsProcessed = rawCampaigns.length
 
     if (rawCampaigns.length > 0) {
       const campaignRows = rawCampaigns.map((ac) => {
         const n = normalizeACCampaign(ac)
+        // Resolve list names from the campaign's lists array
+        const listIds: string[] = Array.isArray(ac.lists) ? ac.lists : []
+        const listName = listIds
+          .map((id) => listNameMap[id])
+          .filter(Boolean)
+          .join(', ') || null
+
         return {
           external_id: n.id,
           source_type: 'activecampaign',
@@ -73,6 +94,7 @@ export async function POST(request: Request) {
           status: n.status,
           type: n.type,
           send_date: n.sendDate,
+          list_name: listName,
           total_sent: n.totalSent,
           total_opens: n.totalOpens,
           unique_opens: n.uniqueOpens,
@@ -89,31 +111,79 @@ export async function POST(request: Request) {
         }
       })
 
-      // Upsert in batches of 50 to stay within Supabase request limits
       for (let i = 0; i < campaignRows.length; i += 50) {
         const batch = campaignRows.slice(i, i + 50)
         const { error } = await admin
           .from('campaigns')
           .upsert(batch, { onConflict: 'external_id' })
 
-        if (error) {
-          throw new Error(`Campaign upsert batch failed: ${error.message}`)
-        }
+        if (error) throw new Error(`Campaign upsert batch failed: ${error.message}`)
         campaignsUpserted += batch.length
       }
     }
 
-    // ── 5. Sync contacts ─────────────────────────────────────────────────────
-    // Fetch up to 2000 contacts; full backfill can be triggered separately
-    const rawContacts = await fetchContactsBatched(2000)
+    // ── 6. Per-campaign statistics pass (with 100ms rate-limit delay) ──────
+    // Fetches fresh stats per campaign from the /statistics endpoint and updates the DB.
+    for (const ac of rawCampaigns) {
+      await sleep(100)
+
+      const stats = await fetchCampaignStatistics(ac.id)
+      if (!stats) continue
+
+      // Build updated stat fields from the statistics response
+      const totalSent =
+        parseInt((stats.send_amt ?? ac.send_amt) as string, 10) || 0
+      const uniqueOpens =
+        parseInt((stats.unique_opens ?? ac.unique_opens) as string, 10) || 0
+      const totalOpens =
+        parseInt((stats.opens ?? ac.opens) as string, 10) || 0
+      const totalClicks =
+        parseInt((stats.linkclicks ?? ac.linkclicks) as string, 10) || 0
+      const uniqueClicks =
+        parseInt((stats.uniquelinkclicks ?? ac.uniquelinkclicks) as string, 10) || 0
+      const hardbounces =
+        parseInt((stats.hardbounces ?? ac.hardbounces) as string, 10) || 0
+      const softbounces =
+        parseInt((stats.softbounces ?? ac.softbounces) as string, 10) || 0
+      const bounces = hardbounces + softbounces
+      const unsubscribes =
+        parseInt((stats.unsubscribes ?? ac.unsubscribes) as string, 10) || 0
+      const forwards =
+        parseInt((stats.forwards ?? ac.forwards) as string, 10) || 0
+
+      const openRate = totalSent > 0 ? uniqueOpens / totalSent : 0
+      const clickRate = totalSent > 0 ? uniqueClicks / totalSent : 0
+      const bounceRate = totalSent > 0 ? bounces / totalSent : 0
+      const unsubscribeRate = totalSent > 0 ? unsubscribes / totalSent : 0
+
+      await admin
+        .from('campaigns')
+        .update({
+          total_sent: totalSent,
+          total_opens: totalOpens,
+          unique_opens: uniqueOpens,
+          total_clicks: totalClicks,
+          unique_clicks: uniqueClicks,
+          bounces,
+          unsubscribes,
+          forwards,
+          open_rate: openRate,
+          click_rate: clickRate,
+          bounce_rate: bounceRate,
+          unsubscribe_rate: unsubscribeRate,
+        })
+        .eq('external_id', ac.id)
+    }
+
+    // ── 7. Sync contacts (with inline contactTags) ─────────────────────────
+    const { contacts: rawContacts, contactTags: inlineContactTags = [] } =
+      await fetchContactsBatched(2000)
     contactsProcessed = rawContacts.length
 
     if (rawContacts.length > 0) {
-      // Upsert contacts and their source records in batches
       for (let i = 0; i < rawContacts.length; i += 50) {
         const batch = rawContacts.slice(i, i + 50)
 
-        // Build contact rows
         const contactRows = batch.map((ac: ACContact) => ({
           email: ac.email.toLowerCase().trim(),
           first_name: ac.firstName || null,
@@ -123,7 +193,6 @@ export async function POST(request: Request) {
           is_subscribed: ac.deleted === '0' && ac.anonymized === '0',
         }))
 
-        // Upsert contacts (on email conflict, update fields)
         const { data: upsertedContacts, error: contactError } = await admin
           .from('contacts')
           .upsert(contactRows, {
@@ -136,13 +205,18 @@ export async function POST(request: Request) {
           throw new Error(`Contact upsert batch failed: ${contactError.message}`)
         }
 
-        // Build a map of email → contact UUID
         const emailToId: Record<string, string> = {}
         for (const c of upsertedContacts ?? []) {
           emailToId[c.email] = c.id
         }
 
-        // Upsert contact_sources (links AC ID → internal contact UUID)
+        // Build AC contact ID → internal UUID map for tag syncing
+        const acIdToEmail: Record<string, string> = {}
+        for (const ac of batch) {
+          acIdToEmail[ac.id] = ac.email.toLowerCase().trim()
+        }
+
+        // Upsert contact_sources
         const sourceRows = batch
           .filter((ac: ACContact) => emailToId[ac.email.toLowerCase().trim()])
           .map((ac: ACContact) => ({
@@ -167,7 +241,67 @@ export async function POST(request: Request) {
       }
     }
 
-    // ── 6. Mark sync as completed ────────────────────────────────────────────
+    // ── 8. Sync tags and contact_tags from inline contactTags ──────────────
+    // Only sync tags that have names in our tag map
+    if (inlineContactTags.length > 0 && Object.keys(tagNameMap).length > 0) {
+      // Upsert unique tag definitions
+      const uniqueTagIds = Array.from(new Set(inlineContactTags.map((ct) => ct.tag)))
+      const tagRows = uniqueTagIds
+        .filter((id) => tagNameMap[id])
+        .map((id) => ({
+          name: tagNameMap[id],
+          source_type: 'activecampaign' as const,
+          external_id: id,
+        }))
+
+      if (tagRows.length > 0) {
+        await admin
+          .from('tags')
+          .upsert(tagRows, { onConflict: 'name', ignoreDuplicates: false })
+      }
+
+      // Fetch all tags to build external_id → internal UUID map
+      const { data: tagRecords } = await admin
+        .from('tags')
+        .select('id, external_id')
+        .eq('source_type', 'activecampaign')
+        .not('external_id', 'is', null)
+
+      const acTagIdToDbId: Record<string, string> = {}
+      for (const t of tagRecords ?? []) {
+        if (t.external_id) acTagIdToDbId[t.external_id] = t.id
+      }
+
+      // Fetch contact_sources to build AC contact ID → internal contact UUID map
+      const { data: sourceRecords } = await admin
+        .from('contact_sources')
+        .select('contact_id, external_id')
+        .eq('source_type', 'activecampaign')
+
+      const acContactIdToDbId: Record<string, string> = {}
+      for (const s of sourceRecords ?? []) {
+        acContactIdToDbId[s.external_id] = s.contact_id
+      }
+
+      // Upsert contact_tags in batches
+      const contactTagRows = inlineContactTags
+        .filter(
+          (ct) => acContactIdToDbId[ct.contact] && acTagIdToDbId[ct.tag]
+        )
+        .map((ct) => ({
+          contact_id: acContactIdToDbId[ct.contact],
+          tag_id: acTagIdToDbId[ct.tag],
+        }))
+
+      for (let i = 0; i < contactTagRows.length; i += 100) {
+        const batch = contactTagRows.slice(i, i + 100)
+        await admin
+          .from('contact_tags')
+          .upsert(batch, { onConflict: 'contact_id,tag_id', ignoreDuplicates: true })
+      }
+    }
+
+    // ── 9. Mark sync as completed ──────────────────────────────────────────
     await admin
       .from('sync_logs')
       .update({
@@ -191,7 +325,6 @@ export async function POST(request: Request) {
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Unknown error'
 
-    // Mark sync as failed
     await admin
       .from('sync_logs')
       .update({

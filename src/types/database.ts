@@ -56,6 +56,7 @@ export interface DbCampaign {
   status: 'draft' | 'scheduled' | 'sending' | 'paused' | 'sent' | null
   type: string | null
   send_date: string | null
+  list_name: string | null
   total_sent: number
   total_opens: number
   unique_opens: number
@@ -71,6 +72,40 @@ export interface DbCampaign {
   raw_data: Record<string, unknown> | null
   created_at: string
   updated_at: string
+}
+
+export interface DbCampaignContact {
+  id: string
+  campaign_id: string
+  contact_id: string
+  opened: boolean
+  clicked: boolean
+  bounced: boolean
+  unsubscribed: boolean
+  open_count: number
+  click_count: number
+  first_opened_at: string | null
+  last_opened_at: string | null
+  first_clicked_at: string | null
+}
+
+/** Shape returned when joining campaign_contacts with campaigns */
+export interface DbCampaignContactWithCampaign extends DbCampaignContact {
+  campaigns: Pick<DbCampaign, 'id' | 'external_id' | 'name' | 'subject' | 'send_date'> | null
+}
+
+/** Shape returned when joining contact_tags with tags */
+export interface DbContactTagWithTag {
+  tag_id: string
+  tags: Pick<DbTag, 'id' | 'name'> | null
+}
+
+/** Shape returned when joining contact_lists with lists */
+export interface DbContactListWithList {
+  list_id: string
+  status: string | null
+  subscribed_at: string | null
+  lists: Pick<DbList, 'id' | 'name'> | null
 }
 
 export interface DbSyncLog {
