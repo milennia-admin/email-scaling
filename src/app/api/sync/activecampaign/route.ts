@@ -113,9 +113,19 @@ export async function POST(request: Request) {
 
       for (let i = 0; i < campaignRows.length; i += 50) {
         const batch = campaignRows.slice(i, i + 50)
-        const { error } = await admin
+        let { error } = await admin
           .from('campaigns')
           .upsert(batch, { onConflict: 'external_id' })
+
+        // If list_name column doesn't exist yet (migration pending), retry without it
+        if (error?.message?.includes("'list_name'")) {
+          // eslint-disable-next-line @typescript-eslint/no-unused-vars
+          const batchWithoutListName = batch.map(({ list_name: _, ...rest }) => rest)
+          const retryResult = await admin
+            .from('campaigns')
+            .upsert(batchWithoutListName, { onConflict: 'external_id' })
+          error = retryResult.error
+        }
 
         if (error) throw new Error(`Campaign upsert batch failed: ${error.message}`)
         campaignsUpserted += batch.length
