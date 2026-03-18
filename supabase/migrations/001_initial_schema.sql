@@ -1,5 +1,5 @@
 -- ============================================================
--- Milennia Email Dashboard — Initial Schema
+-- Milennia Email Dashboard - Initial Schema
 -- Designed to unify: ActiveCampaign, GoHighLevel, Hyros, Monday.com
 -- ============================================================
 
