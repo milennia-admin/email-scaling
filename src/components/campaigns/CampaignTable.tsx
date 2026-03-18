@@ -2,6 +2,15 @@ import Link from 'next/link'
 import type { CampaignStatus } from '@/types/activecampaign'
 import type { CampaignRow } from '@/app/dashboard/campaigns/page'
 
+const TYPE_LABELS: Record<string, string> = {
+  single: 'Single',
+  automation: 'Auto',
+  recurring: 'Recurring',
+  split: 'Split',
+  activerss: 'RSS',
+  text: 'Text',
+}
+
 function StatusBadge({ status }: { status: CampaignStatus }) {
   const styles: Record<CampaignStatus, string> = {
     sent: 'bg-green-50 text-green-700 ring-green-600/20',
@@ -27,9 +36,24 @@ function formatDate(dateStr: string | null | undefined): string {
   return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
 }
 
-function formatRate(rate: number | null | undefined): string {
-  if (rate === null || rate === undefined || rate === 0) return '—'
-  return `${(rate * 100).toFixed(1)}%`
+/**
+ * Show a rate as percentage.
+ * - If totalSent === 0 (not sent yet): show '—'
+ * - If totalSent > 0: always show a number, even 0.0%
+ */
+function formatRate(rate: number | null | undefined, totalSent: number): string {
+  if (!totalSent) return '—'
+  return `${((rate ?? 0) * 100).toFixed(1)}%`
+}
+
+/**
+ * Show a count.
+ * - If totalSent === 0: show '—'
+ * - If totalSent > 0: show the number (including 0)
+ */
+function formatCount(count: number, totalSent: number): string {
+  if (!totalSent) return '—'
+  return count.toLocaleString()
 }
 
 interface CampaignTableProps {
@@ -63,71 +87,87 @@ export default function CampaignTable({ campaigns }: CampaignTableProps) {
             <th scope="col" className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">
               Send Date
             </th>
-            <th scope="col" className="px-6 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider">
+            <th scope="col" className="px-4 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider">
               Sent
             </th>
-            <th scope="col" className="px-6 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider">
+            <th scope="col" className="px-4 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider">
               Open Rate
             </th>
-            <th scope="col" className="px-6 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider">
+            <th scope="col" className="px-4 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider">
               Click Rate
             </th>
-            <th scope="col" className="px-6 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider">
+            <th scope="col" className="px-4 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider">
+              Bounce Rate
+            </th>
+            <th scope="col" className="px-4 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider">
+              Unsub Rate
+            </th>
+            <th scope="col" className="px-4 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider">
               Unsubs
             </th>
           </tr>
         </thead>
         <tbody className="bg-white divide-y divide-gray-100">
-          {campaigns.map((campaign) => (
-            <tr
-              key={campaign.id}
-              className="hover:bg-gray-50 transition-colors cursor-pointer"
-            >
+          {campaigns.map((c) => (
+            <tr key={c.id} className="hover:bg-gray-50 transition-colors cursor-pointer">
               <td className="px-6 py-4">
-                <Link href={`/dashboard/campaigns/${campaign.id}`} className="block">
+                <Link href={`/dashboard/campaigns/${c.id}`} className="block">
                   <p className="text-sm font-medium text-gray-900 truncate max-w-xs hover:text-indigo-600 transition-colors">
-                    {campaign.name}
+                    {c.name}
                   </p>
-                  {campaign.subject && (
-                    <p className="text-xs text-gray-400 truncate max-w-xs mt-0.5">
-                      {campaign.subject}
-                    </p>
+                  {c.subject && (
+                    <p className="text-xs text-gray-400 truncate max-w-xs mt-0.5">{c.subject}</p>
                   )}
-                  {campaign.listName && (
-                    <p className="text-xs text-gray-400 truncate max-w-xs mt-0.5">
-                      → {campaign.listName}
-                    </p>
-                  )}
+                  <div className="flex items-center gap-2 mt-0.5">
+                    {c.listName && (
+                      <p className="text-xs text-gray-400 truncate max-w-xs">→ {c.listName}</p>
+                    )}
+                    {c.type && TYPE_LABELS[c.type] && (
+                      <span className="inline-flex items-center rounded px-1.5 py-0.5 text-xs font-medium bg-gray-100 text-gray-500">
+                        {TYPE_LABELS[c.type]}
+                      </span>
+                    )}
+                  </div>
                 </Link>
               </td>
               <td className="px-6 py-4 whitespace-nowrap">
-                <Link href={`/dashboard/campaigns/${campaign.id}`}>
-                  <StatusBadge status={campaign.status} />
+                <Link href={`/dashboard/campaigns/${c.id}`}>
+                  <StatusBadge status={c.status} />
                 </Link>
               </td>
               <td className="px-6 py-4 whitespace-nowrap">
-                <Link href={`/dashboard/campaigns/${campaign.id}`} className="text-sm text-gray-600">
-                  {formatDate(campaign.sendDate)}
+                <Link href={`/dashboard/campaigns/${c.id}`} className="text-sm text-gray-600">
+                  {formatDate(c.sendDate)}
                 </Link>
               </td>
-              <td className="px-6 py-4 whitespace-nowrap text-right">
-                <Link href={`/dashboard/campaigns/${campaign.id}`} className="text-sm text-gray-900 font-medium tabular-nums">
-                  {campaign.totalSent > 0 ? campaign.totalSent.toLocaleString() : '—'}
+              <td className="px-4 py-4 whitespace-nowrap text-right">
+                <Link href={`/dashboard/campaigns/${c.id}`} className="text-sm text-gray-900 font-medium tabular-nums">
+                  {c.totalSent > 0 ? c.totalSent.toLocaleString() : '—'}
                 </Link>
               </td>
-              <td className="px-6 py-4 whitespace-nowrap text-right">
-                <Link href={`/dashboard/campaigns/${campaign.id}`} className="text-sm text-gray-900 tabular-nums">
-                  {formatRate(campaign.openRate)}
+              <td className="px-4 py-4 whitespace-nowrap text-right">
+                <Link href={`/dashboard/campaigns/${c.id}`} className="text-sm tabular-nums text-gray-900">
+                  {formatRate(c.openRate, c.totalSent)}
                 </Link>
               </td>
-              <td className="px-6 py-4 whitespace-nowrap text-right">
-                <Link href={`/dashboard/campaigns/${campaign.id}`} className="text-sm text-gray-900 tabular-nums">
-                  {formatRate(campaign.clickRate)}
+              <td className="px-4 py-4 whitespace-nowrap text-right">
+                <Link href={`/dashboard/campaigns/${c.id}`} className="text-sm tabular-nums text-gray-900">
+                  {formatRate(c.clickRate, c.totalSent)}
                 </Link>
               </td>
-              <td className="px-6 py-4 whitespace-nowrap text-right">
-                <Link href={`/dashboard/campaigns/${campaign.id}`} className="text-sm text-gray-900 tabular-nums">
-                  {campaign.unsubscribes > 0 ? campaign.unsubscribes.toLocaleString() : '—'}
+              <td className="px-4 py-4 whitespace-nowrap text-right">
+                <Link href={`/dashboard/campaigns/${c.id}`} className="text-sm tabular-nums text-gray-900">
+                  {formatRate(c.bounceRate, c.totalSent)}
+                </Link>
+              </td>
+              <td className="px-4 py-4 whitespace-nowrap text-right">
+                <Link href={`/dashboard/campaigns/${c.id}`} className="text-sm tabular-nums text-gray-900">
+                  {formatRate(c.unsubscribeRate, c.totalSent)}
+                </Link>
+              </td>
+              <td className="px-4 py-4 whitespace-nowrap text-right">
+                <Link href={`/dashboard/campaigns/${c.id}`} className="text-sm tabular-nums text-gray-900">
+                  {formatCount(c.unsubscribes, c.totalSent)}
                 </Link>
               </td>
             </tr>

@@ -14,6 +14,8 @@ interface ContactsPageProps {
     search?: string
     status?: string
     tag?: string
+    dateRange?: string
+    sort?: string
     page?: string
   }
 }
@@ -22,11 +24,15 @@ async function ContactsContent({
   search,
   status,
   tagId,
+  dateRange,
+  sort,
   page,
 }: {
   search: string
   status: string
   tagId: string
+  dateRange: string
+  sort: string
   page: number
 }) {
   const supabase = createClient()
@@ -62,6 +68,15 @@ async function ContactsContent({
   if (status === 'subscribed') query = query.eq('is_subscribed', true)
   else if (status === 'unsubscribed') query = query.eq('is_subscribed', false)
 
+  if (dateRange) {
+    const days = parseInt(dateRange, 10)
+    if (!isNaN(days) && days > 0) {
+      const from = new Date()
+      from.setDate(from.getDate() - days)
+      query = query.gte('created_at', from.toISOString())
+    }
+  }
+
   if (tagContactIds !== null) {
     if (tagContactIds.length === 0) {
       return <EmptyState filtered />
@@ -69,8 +84,16 @@ async function ContactsContent({
     query = query.in('id', tagContactIds)
   }
 
+  // Sort — 'campaigns' sorts client-side after fetch (join count not easily sortable server-side)
+  if (sort === 'oldest') {
+    query = query.order('created_at', { ascending: true })
+  } else if (sort === 'email') {
+    query = query.order('email', { ascending: true })
+  } else {
+    query = query.order('created_at', { ascending: false })
+  }
+
   const { data, count, error } = await query
-    .order('created_at', { ascending: false })
     .range(offset, offset + PAGE_SIZE - 1)
 
   if (error) {
@@ -87,7 +110,7 @@ async function ContactsContent({
 
   // Shape data into ContactRow[]
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const contacts: ContactRow[] = (data as any[]).map((c) => {
+  let contacts: ContactRow[] = (data as any[]).map((c) => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const tagNames: string[] = (c.contact_tags ?? []).map((ct: any) => ct.tags?.name).filter(Boolean)
     const campaignCount: number = (c.campaign_contacts ?? []).length
@@ -108,6 +131,11 @@ async function ContactsContent({
     }
   })
 
+  // 'Most campaigns' sort is applied client-side since it's derived from the join count
+  if (sort === 'campaigns') {
+    contacts = contacts.sort((a, b) => b.campaignCount - a.campaignCount)
+  }
+
   const total = count ?? 0
   const startItem = offset + 1
   const endItem = Math.min(offset + contacts.length, total)
@@ -120,12 +148,12 @@ async function ContactsContent({
           Showing {startItem.toLocaleString()}–{endItem.toLocaleString()} of{' '}
           {total.toLocaleString()} contacts
         </p>
-        {totalPages > 1 && <Pagination page={page} totalPages={totalPages} search={search} status={status} tagId={tagId} />}
+        {totalPages > 1 && <Pagination page={page} totalPages={totalPages} search={search} status={status} tagId={tagId} dateRange={dateRange} sort={sort} />}
       </div>
       <ContactTable contacts={contacts} />
       {totalPages > 1 && (
         <div className="px-6 py-4 border-t border-gray-100 flex justify-end">
-          <Pagination page={page} totalPages={totalPages} search={search} status={status} tagId={tagId} />
+          <Pagination page={page} totalPages={totalPages} search={search} status={status} tagId={tagId} dateRange={dateRange} sort={sort} />
         </div>
       )}
     </div>
@@ -157,11 +185,13 @@ function EmptyState({ filtered }: { filtered?: boolean }) {
   )
 }
 
-function buildPageUrl(page: number, search: string, status: string, tagId: string) {
+function buildPageUrl(page: number, search: string, status: string, tagId: string, dateRange: string, sort: string) {
   const params = new URLSearchParams()
   if (search) params.set('search', search)
   if (status) params.set('status', status)
   if (tagId) params.set('tag', tagId)
+  if (dateRange) params.set('dateRange', dateRange)
+  if (sort) params.set('sort', sort)
   if (page > 1) params.set('page', String(page))
   const qs = params.toString()
   return `/dashboard/contacts${qs ? `?${qs}` : ''}`
@@ -173,18 +203,22 @@ function Pagination({
   search,
   status,
   tagId,
+  dateRange,
+  sort,
 }: {
   page: number
   totalPages: number
   search: string
   status: string
   tagId: string
+  dateRange: string
+  sort: string
 }) {
   return (
     <div className="flex items-center gap-2">
       {page > 1 ? (
         <a
-          href={buildPageUrl(page - 1, search, status, tagId)}
+          href={buildPageUrl(page - 1, search, status, tagId, dateRange, sort)}
           className="inline-flex items-center rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
         >
           Previous
@@ -199,7 +233,7 @@ function Pagination({
       </span>
       {page < totalPages ? (
         <a
-          href={buildPageUrl(page + 1, search, status, tagId)}
+          href={buildPageUrl(page + 1, search, status, tagId, dateRange, sort)}
           className="inline-flex items-center rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
         >
           Next
@@ -217,6 +251,8 @@ export default async function ContactsPage({ searchParams }: ContactsPageProps) 
   const search = searchParams.search ?? ''
   const status = searchParams.status ?? ''
   const tagId = searchParams.tag ?? ''
+  const dateRange = searchParams.dateRange ?? ''
+  const sort = searchParams.sort ?? ''
   const page = Math.max(1, parseInt(searchParams.page ?? '1', 10))
 
   const supabase = createClient()
@@ -241,7 +277,7 @@ export default async function ContactsPage({ searchParams }: ContactsPageProps) 
             </div>
           }
         >
-          <ContactsContent search={search} status={status} tagId={tagId} page={page} />
+          <ContactsContent search={search} status={status} tagId={tagId} dateRange={dateRange} sort={sort} page={page} />
         </Suspense>
       </div>
     </div>
