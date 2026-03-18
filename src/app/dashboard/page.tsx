@@ -1,5 +1,6 @@
 import { createClient } from '@/lib/supabase/server'
 import Header from '@/components/dashboard/Header'
+import SyncButton from '@/components/dashboard/SyncButton'
 import type { DbSyncLog } from '@/types/database'
 
 async function getLastSync(supabase: ReturnType<typeof createClient>): Promise<DbSyncLog | null> {
@@ -73,6 +74,7 @@ export default async function DashboardPage() {
       <Header
         title="Overview"
         subtitle="Milennia email marketing dashboard"
+        actions={<SyncButton lastSyncAt={lastSync?.completed_at ?? null} />}
       />
 
       <div className="px-6 py-6 space-y-6">
@@ -91,11 +93,7 @@ export default async function DashboardPage() {
           <div className="flex items-center gap-3 rounded-lg border border-yellow-200 bg-yellow-50 px-4 py-3">
             <div className="h-2 w-2 rounded-full bg-yellow-500 flex-shrink-0" />
             <p className="text-sm text-yellow-700">
-              No sync has run yet. Call{' '}
-              <code className="font-mono bg-yellow-100 px-1 rounded">
-                POST /api/sync/activecampaign
-              </code>{' '}
-              to import data from ActiveCampaign.
+              No sync has run yet. Click <span className="font-medium">Sync now</span> to import data from ActiveCampaign.
             </p>
           </div>
         )}
@@ -154,11 +152,7 @@ export default async function DashboardPage() {
               — pulls directly from ActiveCampaign in real time
             </li>
             <li>
-              →{' '}
-              <span className="font-mono text-xs bg-gray-100 px-1.5 py-0.5 rounded">
-                POST /api/sync/activecampaign
-              </span>{' '}
-              — sync campaigns and contacts into Supabase
+              → Use the <span className="font-medium">Sync now</span> button above to import campaigns and contacts into Supabase. Auto-syncs every 5 minutes.
             </li>
           </ul>
         </div>
